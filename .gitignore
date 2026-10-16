@@ -1,0 +1,40 @@
+# Local environments, agent settings and caches
+/tflm_env/
+/.venv/
+/.agents/
+/.codex/
+__pycache__/
+*.py[cod]
+*.egg-info/
+/.pycache_period_noise_check/
+/.pytest_cache/
+/%SystemDrive%/
+
+# Local logs and generated archives
+*.log
+*.zip
+/archive/
+/submission_*/
+/dist/
+/build/
+
+# Local experimental datasets and annotations
+/data/
+/data_raw/
+/data_labeled/
+/annotations/
+
+# Generated models, reports and calibration exports
+/artifacts/
+/outputs/
+/period_noise_exports/
+/period_template.*
+/period_template_config.json
+/restore_preview/
+
+# Local credentials and editor metadata
+.env
+.env.*
+!.env.example
+/.idea/
+/.vscode/

@@ -1,0 +1,253 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8" />
+  <style>
+    html,
+    body {
+      margin: 0;
+      padding: 0;
+      background: transparent;
+      font-family: system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+    }
+
+    #panel {
+      box-sizing: border-box;
+      border: 1px solid #d1d5db;
+      border-radius: 6px;
+      padding: 8px 10px;
+      color: #111827;
+      background: #f9fafb;
+      font-size: 14px;
+      line-height: 1.45;
+    }
+
+    #status {
+      font-weight: 700;
+    }
+
+    #help {
+      margin-top: 3px;
+      color: #4b5563;
+    }
+
+    #debug {
+      margin-top: 3px;
+      color: #6b7280;
+      font-size: 12px;
+    }
+  </style>
+</head>
+<body>
+  <div id="panel" tabindex="0">
+    <div id="status">快捷键未启用</div>
+    <div id="help"></div>
+    <div id="debug"></div>
+  </div>
+
+  <script>
+    const MESSAGE_SOURCE = "plant-keyboard-shortcuts";
+    const HANDLER_NAME = "__plantTagShortcutHandler";
+    const TARGETS_NAME = "__plantTagShortcutTargets";
+    const STATE_NAME = "__plantTagShortcutState";
+    const KEYS = new Set(["1", "2", "3", "4", "5", "6", "7", "8", "9", "0", "Escape", "p", "P"]);
+    let args = {};
+
+    const postStreamlitMessage = (type, data = {}) => {
+      window.parent.postMessage(
+        {
+          isStreamlitMessage: true,
+          type,
+          ...data,
+        },
+        "*"
+      );
+    };
+
+    const setComponentValue = (value) => {
+      postStreamlitMessage("streamlit:setComponentValue", {
+        value,
+        dataType: "json",
+      });
+    };
+
+    const writeShortcutQuery = (value) => {
+      try {
+        const params = new URLSearchParams(window.parent.location.search);
+        params.set("标签快捷键", value.key || "");
+        params.set("标注文件", value.fileKey || "");
+        params.set("标签事件", value.eventId || "");
+        const search = params.toString();
+        window.parent.history.replaceState(null, "", window.parent.location.pathname + (search ? `?${search}` : ""));
+        window.parent.dispatchEvent(new PopStateEvent("popstate"));
+      } catch (_) {
+        // The component value path is the primary channel; query params are only a fallback.
+      }
+    };
+
+    const setFrameHeight = () => {
+      const height = args.enabled ? document.documentElement.scrollHeight : 0;
+      postStreamlitMessage("streamlit:setFrameHeight", { height });
+    };
+
+    const debug = (text) => {
+      const el = document.getElementById("debug");
+      if (el) el.textContent = text || "";
+    };
+
+    const isEditable = (el) => {
+      if (!el) return false;
+      const tag = (el.tagName || "").toUpperCase();
+      return (
+        tag === "INPUT" ||
+        tag === "TEXTAREA" ||
+        tag === "SELECT" ||
+        el.isContentEditable ||
+        el.getAttribute("role") === "textbox" ||
+        el.closest?.("[contenteditable='true']")
+      );
+    };
+
+    const removeExistingHandler = (parentWindow, parentDocument) => {
+      if (!parentWindow[HANDLER_NAME]) return;
+      const oldTargets = parentWindow[TARGETS_NAME] || [parentDocument];
+      for (const target of oldTargets) {
+        try {
+          target.removeEventListener("keydown", parentWindow[HANDLER_NAME], true);
+        } catch (_) {
+          // Detached iframe targets are harmless.
+        }
+      }
+      parentWindow[HANDLER_NAME] = null;
+      parentWindow[TARGETS_NAME] = [];
+    };
+
+    const updateStatus = (parentWindow) => {
+      const statusEl = document.getElementById("status");
+      const helpEl = document.getElementById("help");
+      if (!statusEl || !helpEl) return;
+
+      if (!args.enabled) {
+        statusEl.textContent = "快捷键未启用";
+        helpEl.textContent = "";
+        debug("");
+        return;
+      }
+
+      const state = parentWindow[STATE_NAME] || {};
+      if (state.confirmedTag) {
+        statusEl.textContent = `当前待用标签：${state.confirmedTag}。单击波形后只添加一次。`;
+      } else {
+        statusEl.textContent = "当前未选择标签。按数字键选择待用标签，或直接单击波形后添加少用标签。";
+      }
+      helpEl.textContent = args.helpText || "";
+    };
+
+    const sendShortcut = (key) => {
+      const tagByKey = args.tagByKey || {};
+      const eventId = `${Date.now()}-${Math.random().toString(16).slice(2)}`;
+      const value = {
+        source: MESSAGE_SOURCE,
+        fileKey: args.fileKey || "",
+        key,
+        eventId,
+      };
+      debug(
+        key === "Escape"
+          ? "最近按键：Esc（已收到，等待页面确认）"
+          : key.toLowerCase() === "p"
+            ? "最近按键：P 撤销（已收到，等待页面确认）"
+            : `最近按键：${key} ${tagByKey[key] || ""}（已收到，等待页面确认）`
+      );
+      writeShortcutQuery(value);
+      setComponentValue(value);
+    };
+
+    const showWaitingStatus = (key) => {
+      const statusEl = document.getElementById("status");
+      const tagByKey = args.tagByKey || {};
+      if (!statusEl) return;
+      if (key === "Escape") {
+        statusEl.textContent = "已收到取消操作，正在同步到页面。";
+      } else if (key.toLowerCase() === "p") {
+        statusEl.textContent = "已收到撤销操作，正在同步到页面。";
+      } else {
+        statusEl.textContent = `已收到：${tagByKey[key] || ""}，正在同步到页面。`;
+      }
+    };
+
+    const installHandler = () => {
+      const parentWindow = window.parent;
+      const parentDocument = parentWindow.document;
+      removeExistingHandler(parentWindow, parentDocument);
+
+      if (!args.enabled) {
+        parentWindow[STATE_NAME] = {};
+        updateStatus(parentWindow);
+        setFrameHeight();
+        return;
+      }
+
+      parentWindow[STATE_NAME] = {
+        fileKey: args.fileKey || "",
+        confirmedTag: args.initialTag || "",
+        hasPendingPoint: Boolean(args.hasPendingPoint),
+      };
+
+      parentWindow[HANDLER_NAME] = (event) => {
+        if (!KEYS.has(event.key) || event.ctrlKey || event.metaKey || event.altKey) return;
+        if (isEditable(event.target) || isEditable(parentDocument.activeElement) || isEditable(document.activeElement)) {
+          debug("输入控件正在编辑，快捷键已暂停。");
+          return;
+        }
+
+        event.preventDefault();
+        const state = parentWindow[STATE_NAME] || {};
+        if (event.key === "Escape") {
+          state.confirmedTag = "";
+          parentWindow[STATE_NAME] = state;
+          showWaitingStatus(event.key);
+          sendShortcut(event.key);
+          return;
+        }
+
+        state.fileKey = args.fileKey || "";
+        state.confirmedTag = "";
+        state.hasPendingPoint = false;
+        parentWindow[STATE_NAME] = state;
+        showWaitingStatus(event.key);
+        sendShortcut(event.key);
+      };
+
+      const targets = [parentDocument, document];
+      for (const target of targets) {
+        target.addEventListener("keydown", parentWindow[HANDLER_NAME], true);
+      }
+      parentWindow[TARGETS_NAME] = targets;
+      updateStatus(parentWindow);
+      debug("监听状态：已挂载。");
+      setFrameHeight();
+    };
+
+    const render = (nextArgs) => {
+      args = nextArgs || {};
+      const panel = document.getElementById("panel");
+      panel.style.display = args.enabled ? "block" : "none";
+      try {
+        installHandler();
+      } catch (error) {
+        debug(`监听状态：未挂载（${error && error.message ? error.message : error}）`);
+        setFrameHeight();
+      }
+    };
+
+    window.addEventListener("message", (event) => {
+      if (!event.data || event.data.type !== "streamlit:render") return;
+      render(event.data.args || {});
+    });
+
+    postStreamlitMessage("streamlit:componentReady", { apiVersion: 1 });
+    setFrameHeight();
+  </script>
+</body>
+</html>

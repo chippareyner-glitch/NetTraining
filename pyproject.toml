@@ -1,0 +1,26 @@
+[build-system]
+requires = ["setuptools>=61"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "plant-signal-tools"
+version = "0.1.0"
+description = "Plant signal acquisition, annotation, training and CH32 monitoring tools"
+readme = "README.md"
+requires-python = ">=3.10"
+dependencies = ["numpy", "pandas"]
+
+[project.optional-dependencies]
+ui = ["streamlit>=1.37", "plotly", "pyserial"]
+train = ["tensorflow", "scikit-learn", "matplotlib"]
+report = ["matplotlib", "pillow"]
+all = ["streamlit>=1.37", "plotly", "pyserial", "tensorflow", "scikit-learn", "matplotlib", "pillow"]
+
+[project.scripts]
+plant-signal = "plant_signal.cli:main"
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[tool.setuptools.package-data]
+"plant_signal.ui" = ["components/keyboard_shortcuts/*.html"]
